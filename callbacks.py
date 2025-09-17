@@ -16,6 +16,10 @@ from config import DEFAULT_WELCOME_TITLE, DEFAULT_WELCOME_DESCRIPTION, DEFAULT_S
 def register_callbacks(app):
     """Register all callbacks with the Dash app"""
     
+    # Import and register multi-agent callbacks
+    from multi_agent import register_multi_agent_callbacks
+    register_multi_agent_callbacks(app)
+    
     # First callback: Handle inputs and show thinking indicator
     @app.callback(
         [Output("chat-messages", "children", allow_duplicate=True),
@@ -83,10 +87,11 @@ def register_callbacks(app):
          Output("chat-trigger", "data", allow_duplicate=True),
          Output("query-running-store", "data", allow_duplicate=True)],
         [Input("chat-trigger", "data")],
-        [State("chat-messages", "children")],
+        [State("chat-messages", "children"),
+         State("selected-subject", "data")],
         prevent_initial_call=True
     )
-    def get_model_response(trigger_data, current_messages):
+    def get_model_response(trigger_data, current_messages, selected_subject):
         if not trigger_data or not trigger_data.get("trigger"):
             return dash.no_update, dash.no_update, dash.no_update
         
@@ -95,7 +100,9 @@ def register_callbacks(app):
             return dash.no_update, dash.no_update, dash.no_update
         
         try:
-            response, query_text = genie_query(user_input)
+            # Extract the space ID from the selected subject
+            selected_space_id = selected_subject.get('space_id') if selected_subject else None
+            response, query_text = genie_query(user_input, selected_space_id)
             
             if isinstance(response, str):
                 content = dcc.Markdown(response, className="message-text")
@@ -220,79 +227,106 @@ def register_callbacks(app):
             return "query-code-container visible", "Hide code"
         return "query-code-container hidden", "Show code"
 
-    # Add callbacks for welcome text customization
-    @app.callback(
-        [Output("edit-welcome-modal", "is_open", allow_duplicate=True),
-         Output("welcome-title-input", "value"),
-         Output("welcome-description-input", "value"),
-         Output("suggestion-1-input", "value"),
-         Output("suggestion-2-input", "value"),
-         Output("suggestion-3-input", "value"),
-         Output("suggestion-4-input", "value")],
-        [Input("edit-welcome-button", "n_clicks")],
-        [State("welcome-title", "children"),
-         State("welcome-description", "children"),
-         State("suggestion-1-text", "children"),
-         State("suggestion-2-text", "children"),
-         State("suggestion-3-text", "children"),
-         State("suggestion-4-text", "children")],
-        prevent_initial_call=True
-    )
-    def open_modal(n_clicks, current_title, current_description, s1, s2, s3, s4):
-        if not n_clicks:
-            return [no_update] * 7
-        return True, current_title, current_description, s1, s2, s3, s4
 
+    # Callback for updating selected subject, Power BI iframe, and clearing chat when dropdown changes
     @app.callback(
-        [Output("welcome-title", "children", allow_duplicate=True),
-         Output("welcome-description", "children", allow_duplicate=True),
-         Output("suggestion-1-text", "children", allow_duplicate=True),
-         Output("suggestion-2-text", "children", allow_duplicate=True),
-         Output("suggestion-3-text", "children", allow_duplicate=True),
-         Output("suggestion-4-text", "children", allow_duplicate=True),
-         Output("edit-welcome-modal", "is_open", allow_duplicate=True)],
-        [Input("save-welcome-text", "n_clicks"),
-         Input("close-modal", "n_clicks")],
-        [State("welcome-title-input", "value"),
-         State("welcome-description-input", "value"),
-         State("suggestion-1-input", "value"),
-         State("suggestion-2-input", "value"),
-         State("suggestion-3-input", "value"),
-         State("suggestion-4-input", "value"),
-         State("welcome-title", "children"),
-         State("welcome-description", "children"),
-         State("suggestion-1-text", "children"),
-         State("suggestion-2-text", "children"),
-         State("suggestion-3-text", "children"),
-         State("suggestion-4-text", "children")],
+        [Output("selected-subject", "data"),
+         Output("powerbi-iframe", "src"),
+         Output("chat-messages", "children", allow_duplicate=True),
+         Output("welcome-container", "className", allow_duplicate=True),
+         Output("chat-trigger", "data", allow_duplicate=True),
+         Output("query-running-store", "data", allow_duplicate=True)],
+        [Input("subject-dropdown", "value")],
         prevent_initial_call=True
     )
-    def handle_modal_actions(save_clicks, close_clicks,
-                            new_title, new_description, s1, s2, s3, s4,
-                            current_title, current_description,
-                            current_s1, current_s2, current_s3, current_s4):
+    def update_selected_subject(selected_subject_name):
+        from config import BI_SUBJECTS
+        
+        # Find the selected subject
+        selected_subject = None
+        for subject in BI_SUBJECTS:
+            if subject['name'] == selected_subject_name:
+                selected_subject = subject
+                break
+        
+        if selected_subject:
+            # Clear chat and show welcome screen when subject changes
+            return [
+                selected_subject, 
+                selected_subject['powerbi_url'],
+                [],  # Clear chat messages
+                "welcome-container visible",  # Show welcome screen
+                {"trigger": False, "message": ""},  # Reset chat trigger
+                False  # Reset query running state
+            ]
+        else:
+            # Fallback to first subject if not found
+            default_subject = BI_SUBJECTS[0] if BI_SUBJECTS else {'name': 'Default', 'space_id': '', 'powerbi_url': ''}
+            return [
+                default_subject, 
+                default_subject['powerbi_url'],
+                [],  # Clear chat messages
+                "welcome-container visible",  # Show welcome screen
+                {"trigger": False, "message": ""},  # Reset chat trigger
+                False  # Reset query running state
+            ]
+
+    # Navigation callbacks for switching between pages
+    @app.callback(
+        [Output("page-content", "children"),
+         Output("powerbi-genie-button", "className"),
+         Output("multi-agent-button", "className"),
+         Output("current-page", "data")],
+        [Input("powerbi-genie-button", "n_clicks"),
+         Input("multi-agent-button", "n_clicks")],
+        prevent_initial_call=True
+    )
+    def handle_navigation(powerbi_clicks, multi_agent_clicks):
         ctx = callback_context
         if not ctx.triggered:
-            return [no_update] * 7
-
-        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-
-        if trigger_id == "close-modal":
-            return [current_title, current_description, 
-                    current_s1, current_s2, current_s3, current_s4, False]
-        elif trigger_id == "save-welcome-text":
-            # Save the changes
-            title = new_title if new_title else DEFAULT_WELCOME_TITLE
-            description = new_description if new_description else DEFAULT_WELCOME_DESCRIPTION
-            suggestions = [
-                s1 if s1 else DEFAULT_SUGGESTIONS[0],
-                s2 if s2 else DEFAULT_SUGGESTIONS[1],
-                s3 if s3 else DEFAULT_SUGGESTIONS[2],
-                s4 if s4 else DEFAULT_SUGGESTIONS[3]
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        
+        if button_id == "powerbi-genie-button":
+            # Refresh Power BI + Genie page by reloading modules and creating fresh page
+            import importlib
+            import sys
+            
+            # Reload layout module to ensure fresh state
+            if 'layout' in sys.modules:
+                importlib.reload(sys.modules['layout'])
+            if 'config' in sys.modules:
+                importlib.reload(sys.modules['config'])
+            
+            from layout import create_powerbi_genie_page
+            
+            return [
+                create_powerbi_genie_page(),
+                "nav-button nav-button-active",
+                "nav-button", 
+                "powerbi-genie"
             ]
-            return [title, description, *suggestions, False]
+        elif button_id == "multi-agent-button":
+            # Refresh Multi-Agent page by reloading modules and creating fresh page
+            import importlib
+            import sys
+            
+            # Reload multi_agent module to ensure fresh state
+            if 'multi_agent' in sys.modules:
+                importlib.reload(sys.modules['multi_agent'])
+            
+            from multi_agent import create_multi_agent_page
+            
+            return [
+                create_multi_agent_page(),
+                "nav-button",
+                "nav-button nav-button-active",
+                "multi-agent"
+            ]
+        
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
-        return [no_update] * 7
 
     # Modify the clientside callback to target the chat-container
     app.clientside_callback(

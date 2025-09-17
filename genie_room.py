@@ -180,12 +180,13 @@ class GenieClient:
             
         raise TimeoutError(f"Message processing timed out after {timeout} seconds")
 
-def start_new_conversation(question: str) -> Tuple[str, Union[str, pd.DataFrame], Optional[str]]:
+def start_new_conversation(question: str, space_id: str = None) -> Tuple[str, Union[str, pd.DataFrame], Optional[str]]:
     """
     Start a new conversation with Genie.
     
     Args:
         question: The initial question
+        space_id: The Genie space ID to use (defaults to environment variable)
         
     Returns:
         Tuple containing:
@@ -194,9 +195,12 @@ def start_new_conversation(question: str) -> Tuple[str, Union[str, pd.DataFrame]
         - query_text: SQL query text if applicable, otherwise None
     """
     
+    # Use provided space_id or fall back to environment variable
+    selected_space_id = space_id or SPACE_ID
+    
     client = GenieClient(
         host=DATABRICKS_HOST,
-        space_id=SPACE_ID
+        space_id=selected_space_id
     )
     
     try:
@@ -216,13 +220,14 @@ def start_new_conversation(question: str) -> Tuple[str, Union[str, pd.DataFrame]
     except Exception as e:
         return None, f"Sorry, an error occurred: {str(e)}. Please try again.", None
 
-def continue_conversation(conversation_id: str, question: str) -> Tuple[Union[str, pd.DataFrame], Optional[str]]:
+def continue_conversation(conversation_id: str, question: str, space_id: str = None) -> Tuple[Union[str, pd.DataFrame], Optional[str]]:
     """
     Send a follow-up message in an existing conversation.
     
     Args:
         conversation_id: The existing conversation ID
         question: The follow-up question
+        space_id: The Genie space ID to use (defaults to environment variable)
         
     Returns:
         Tuple containing:
@@ -231,9 +236,12 @@ def continue_conversation(conversation_id: str, question: str) -> Tuple[Union[st
     """
     logger.info(f"Continuing conversation {conversation_id} with question: {question[:30]}...")
     
+    # Use provided space_id or fall back to environment variable
+    selected_space_id = space_id or SPACE_ID
+    
     client = GenieClient(
         host=DATABRICKS_HOST,
-        space_id=SPACE_ID
+        space_id=selected_space_id
     )
     
     try:
@@ -313,12 +321,13 @@ def process_genie_response(client, conversation_id, message_id, complete_message
     
     return "No response available", None
 
-def genie_query(question: str) -> Union[Tuple[str, Optional[str]], Tuple[pd.DataFrame, str]]:
+def genie_query(question: str, space_id: str = None) -> Union[Tuple[str, Optional[str]], Tuple[pd.DataFrame, str]]:
     """
     Main entry point for querying Genie.
     
     Args:
         question: The question to ask
+        space_id: The Genie space ID to use (defaults to environment variable)
         
     Returns:
         Tuple containing either:
@@ -327,10 +336,11 @@ def genie_query(question: str) -> Union[Tuple[str, Optional[str]], Tuple[pd.Data
     """
     try:
         # Start a new conversation for each query
-        conversation_id, result, query_text = start_new_conversation(question)
+        conversation_id, result, query_text = start_new_conversation(question, space_id)
         return result, query_text
             
     except Exception as e:
         logger.error(f"Error in conversation: {str(e)}. Please try again.")
         return f"Sorry, an error occurred: {str(e)}. Please try again.", None
+
 

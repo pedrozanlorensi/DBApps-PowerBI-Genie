@@ -3,7 +3,16 @@ command:
 - "app.py"
 
 env:
+# BI_SUBJECT: Define business subjects/topics as JSON array
+# Each subject corresponds to a Genie space and Power BI dashboard by index
+- name: "BI_SUBJECT"
+  value: '["Sales", "Iris"]'
+# SPACE_ID: Genie space IDs corresponding to each subject (JSON array)
 - name: "SPACE_ID"
-  value: "01f0663affb21e319dd62d0c67d89cf8"
+  value: '["01f077dbecc91f748824fb32628467b5", "01f061835f471efa9c809489ff67214c"]'
+# POWERBI_EMBED_URL: Power BI dashboard URLs corresponding to each subject (JSON array)
 - name: "POWERBI_EMBED_URL"
-  value: "https://app.powerbi.com/reportEmbed?reportId=25baf2c4-2cc6-434d-94c1-157650590c23&autoAuth=true&ctid=9f37a392-f0ae-4280-9796-f1864a10effc"
+  value: '["https://app.powerbi.com/reportEmbed?reportId=25baf2c4-2cc6-434d-94c1-157650590c23&autoAuth=true&ctid=9f37a392-f0ae-4280-9796-f1864a10effc", "https://app.powerbi.com/reportEmbed?reportId=565154df-12ac-4d67-93bb-924abe49931c&autoAuth=true&ctid=9f37a392-f0ae-4280-9796-f1864a10effc"]'
+# MULTI_AGENT_SERVING_ENDPOINT: Serving endpoint for multi-agent chatbot
+- name: "MULTI_AGENT_SERVING_ENDPOINT"
+  value: "https://adb-4181970831265458.18.azuredatabricks.net/serving-endpoints/agents_pedroz_genai_catalog-default-mcp-agent/invocations"
