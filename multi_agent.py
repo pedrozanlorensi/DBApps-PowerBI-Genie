@@ -33,23 +33,15 @@ token_minter = TokenMinter(
 
 
 
-def call_multi_agent_endpoint(message: str, history: Optional[list] = None) -> str:
+def call_multi_agent_endpoint(message: str) -> str:
     """Simple API call to multi-agent endpoint"""
     try:
         if not MULTI_AGENT_SERVING_ENDPOINT:
             return "Multi-agent endpoint not configured."
         
-        # Build multi-turn message array: last 5 Q/A pairs (10 messages) + current user
-        messages: list = []
-        if history:
-            # ensure proper structure and cap to last 10 messages
-            try:
-                messages = [m for m in history if isinstance(m, dict) and "role" in m and "content" in m][-10:]
-            except Exception:
-                messages = []
-        messages.append({"role": "user", "content": message})
-
-        payload = {"input": messages}
+        payload = {
+            "input": [{"role": "user", "content": message}]
+        }
         
         headers = {
             "Authorization": f"Bearer {token_minter.get_token()}",
@@ -164,10 +156,7 @@ def create_multi_agent_page():
                 ], className="multi-agent-input-wrapper")
             ], className="multi-agent-content")
         ], className="multi-agent-container")
-    ], className="multi-agent-page"),
-    
-    # Store conversation memory (last 5 Q&A pairs → 10 messages)
-    dcc.Store(id="multi-agent-memory", data=[])
+    ], className="multi-agent-page")
 
 
 
@@ -179,18 +168,16 @@ def register_multi_agent_callbacks(app):
     @app.callback(
         [Output("multi-agent-messages", "children"),
          Output("multi-agent-input", "value"),
-         Output("multi-agent-welcome", "className"),
-         Output("multi-agent-memory", "data")],
+         Output("multi-agent-welcome", "className")],
         [Input("multi-agent-send-button", "n_clicks"),
          Input("multi-agent-input", "n_submit")],
         [State("multi-agent-input", "value"),
-         State("multi-agent-messages", "children"),
-         State("multi-agent-memory", "data")],
+         State("multi-agent-messages", "children")],
         prevent_initial_call=True
     )
-    def handle_multi_agent_input(send_clicks, submit_clicks, input_value, current_messages, memory):
+    def handle_multi_agent_input(send_clicks, submit_clicks, input_value, current_messages):
         if not input_value or not input_value.strip():
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update
         
         # Add user message
         user_message = create_user_message(input_value)
@@ -198,36 +185,19 @@ def register_multi_agent_callbacks(app):
         
         # Call API and get response
         try:
-            # Prepare history for API (convert memory store into role/content list)
-            history = memory if isinstance(memory, list) else []
-            response_text = call_multi_agent_endpoint(input_value, history)
+            response_text = call_multi_agent_endpoint(input_value)
             
             # Create bot response
             content = dcc.Markdown(response_text, className="message-text")
             bot_response = create_bot_response(content, len(updated_messages))
             updated_messages.append(bot_response)
             
-            # Update memory with user question and assistant final answer
-            new_memory = history + [
-                {"role": "user", "content": input_value},
-                {"role": "assistant", "content": response_text}
-            ]
-            # Keep only last 10 messages (5 Q&A pairs)
-            if len(new_memory) > 10:
-                new_memory = new_memory[-10:]
-            
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             error_response = html.Div(error_msg, className="error-message")
             updated_messages.append(error_response)
-            new_memory = (memory if isinstance(memory, list) else []) + [
-                {"role": "user", "content": input_value},
-                {"role": "assistant", "content": error_msg}
-            ]
-            if len(new_memory) > 10:
-                new_memory = new_memory[-10:]
         
-        return updated_messages, "", "multi-agent-welcome-container hidden", new_memory
+        return updated_messages, "", "multi-agent-welcome-container hidden"
 
 
     @app.callback(

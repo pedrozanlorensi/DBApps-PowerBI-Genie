@@ -134,6 +134,45 @@ body {
     flex-shrink: 0;
 }
 
+/* Expanded sidebar width and resizable handle */
+.sidebar.expanded {
+    width: 640px;
+}
+
+/* Draggable vertical resizer */
+.sidebar-resizer {
+    width: 6px;
+    cursor: col-resize;
+    background: transparent;
+    position: relative;
+}
+.sidebar-resizer:hover {
+    background: #EEF2F7;
+}
+
+.toggle-sidebar-button {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    border-radius: 4px;
+    margin-left: 8px;
+}
+
+.toggle-sidebar-button:hover {
+    background-color: #F0F0F0;
+}
+
+.expand-icon {
+    width: 16px;
+    height: 16px;
+    filter: invert(0.5);
+}
+
 .sidebar-content {
     display: flex;
     flex-direction: column;

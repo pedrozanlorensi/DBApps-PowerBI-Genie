@@ -35,12 +35,15 @@ def create_powerbi_genie_page():
                     )
                 ], className="subject-selection-section") if len(BI_SUBJECTS) > 1 else None,
                 
-                # Header with refresh button only
+                # Header with refresh and expand buttons
                 html.Div([
                     html.Div([
                         html.Button([
                             html.Img(src="assets/sync_icon.svg", className="refresh-chat-icon")
-                        ], id="new-chat-button", className="refresh-chat-button", disabled=False)
+                        ], id="new-chat-button", className="refresh-chat-button", disabled=False),
+                        html.Button([
+                            html.Img(src="assets/plus_icon.svg", className="expand-icon")
+                        ], id="toggle-sidebar-button", className="toggle-sidebar-button", title="Expand/Narrow chat panel")
                     ], className="refresh-button-container")
                 ], className="sidebar-header-minimal"),
                 
@@ -129,6 +132,9 @@ def create_powerbi_genie_page():
             ], className="sidebar-content")
         ], id="sidebar", className="sidebar"),
         
+        # Vertical resizer between sidebar and dashboard
+        html.Div([], id="sidebar-resizer", className="sidebar-resizer"),
+
         # Power BI Dashboard Area (Right Side)
         html.Div([
             html.Div([
@@ -198,5 +204,7 @@ def create_layout():
         dcc.Store(id="chat-trigger", data={"trigger": False, "message": ""}),
         dcc.Store(id="query-running-store", data=False),
         dcc.Store(id="selected-subject", data=DEFAULT_SUBJECT),
-        dcc.Store(id="current-page", data="powerbi-genie")
-    ]) 
+        dcc.Store(id="current-page", data="powerbi-genie"),
+        dcc.Store(id="sidebar-expanded", data=False)
+        , html.Div(id='resizer-init')
+    ])

@@ -228,6 +228,20 @@ def register_callbacks(app):
         return "query-code-container hidden", "Show code"
 
 
+    # Expand/collapse sidebar width
+    @app.callback(
+        [Output('sidebar', 'className'), Output('sidebar-expanded', 'data')],
+        [Input('toggle-sidebar-button', 'n_clicks')],
+        [State('sidebar', 'className'), State('sidebar-expanded', 'data')],
+        prevent_initial_call=True
+    )
+    def toggle_sidebar_width(n_clicks, current_class, expanded):
+        if n_clicks is None:
+            return dash.no_update, dash.no_update
+        new_expanded = not expanded
+        base = 'sidebar'
+        return (f"{base} expanded" if new_expanded else base, new_expanded)
+
     # Callback for updating selected subject, Power BI iframe, and clearing chat when dropdown changes
     @app.callback(
         [Output("selected-subject", "data"),
@@ -343,3 +357,55 @@ def register_callbacks(app):
         Input('chat-messages', 'children'),
         prevent_initial_call=True
     ) 
+
+    # Client-side resizer logic for draggable sidebar
+    app.clientside_callback(
+        """
+        function(init) {
+            const sidebar = document.getElementById('sidebar');
+            const resizer = document.getElementById('sidebar-resizer');
+            const main = document.getElementById('main-content');
+            if (!sidebar || !resizer || !main) return '';
+
+            let isDown = false;
+            let startX = 0;
+            let startWidth = 0;
+
+            const minW = 280;
+            const maxW = Math.max(480, Math.floor(window.innerWidth * 0.6));
+
+            function onMouseDown(e){
+                isDown = true;
+                startX = e.clientX;
+                startWidth = sidebar.getBoundingClientRect().width;
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+            }
+            function onMouseMove(e){
+                if(!isDown) return;
+                const dx = e.clientX - startX;
+                let newW = Math.min(maxW, Math.max(minW, startWidth + dx));
+                sidebar.style.width = newW + 'px';
+            }
+            function onMouseUp(){
+                isDown = false;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+
+            // Clean previous listeners to avoid duplicates
+            resizer.onmousedown = null;
+            document.onmousemove = null;
+            document.onmouseup = null;
+
+            resizer.onmousedown = onMouseDown;
+            document.onmousemove = onMouseMove;
+            document.onmouseup = onMouseUp;
+
+            return '';
+        }
+        """,
+        Output('resizer-init', 'children'),
+        Input('page-content', 'children'),
+        prevent_initial_call=False
+    )
