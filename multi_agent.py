@@ -33,6 +33,57 @@ token_minter = TokenMinter(
 
 
 
+def _extract_last_assistant_text_from_output_list(output_list) -> Optional[str]:
+    """Extract the last assistant message text from an 'output' event list."""
+    if not isinstance(output_list, list):
+        return None
+
+    latest_text_segments = []
+    # Traverse from end to start to find the last assistant message quickly
+    for item in reversed(output_list):
+        if isinstance(item, dict) and item.get('type') == 'message' and item.get('role') == 'assistant':
+            content_list = item.get('content', [])
+            if isinstance(content_list, list):
+                for content_part in content_list:
+                    if not isinstance(content_part, dict):
+                        continue
+                    text_value = content_part.get('text')
+                    if isinstance(text_value, str) and text_value.strip():
+                        latest_text_segments.append(text_value)
+            break
+
+    if latest_text_segments:
+        # Join segments if there are multiple
+        latest_text_segments.reverse()
+        return "\n\n".join(latest_text_segments)
+    return None
+
+
+def _extract_latest_text_from_predictions(predictions) -> Optional[str]:
+    """Handle predictions array that may wrap the response in various shapes."""
+    if not isinstance(predictions, list) or len(predictions) == 0:
+        return None
+
+    first_prediction = predictions[0]
+    if not isinstance(first_prediction, dict):
+        return None
+
+    # Case 1: predictions[0]['output'] is a list of events (same as top-level 'output')
+    output_value = first_prediction.get('output')
+    if isinstance(output_value, list):
+        last_text = _extract_last_assistant_text_from_output_list(output_value)
+        if last_text:
+            return last_text
+
+    # Case 2: predictions[0]['output'] is a dict with 'content': {'text': ...}
+    if isinstance(output_value, dict):
+        content_value = output_value.get('content')
+        if isinstance(content_value, dict) and isinstance(content_value.get('text'), str):
+            return content_value['text']
+
+    return None
+
+
 def call_multi_agent_endpoint(message: str) -> str:
     """Simple API call to multi-agent endpoint"""
     try:
@@ -57,16 +108,17 @@ def call_multi_agent_endpoint(message: str) -> str:
         
         response.raise_for_status()
         result = response.json()
-        
-        # Simple response extraction
-        if 'predictions' in result and len(result['predictions']) > 0:
-            prediction = result['predictions'][0]
-            if isinstance(prediction, dict) and 'output' in prediction:
-                output = prediction['output']
-                if isinstance(output, dict) and 'content' in output:
-                    content = output['content']
-                    if isinstance(content, dict) and 'text' in content:
-                        return content['text']
+
+        # Preferred: handle top-level 'output' list of events
+        if isinstance(result, dict) and isinstance(result.get('output'), list):
+            latest_text = _extract_last_assistant_text_from_output_list(result['output'])
+            if latest_text:
+                return latest_text
+
+        # Fallback: handle 'predictions' schema
+        latest_from_predictions = _extract_latest_text_from_predictions(result.get('predictions')) if isinstance(result, dict) else None
+        if latest_from_predictions:
+            return latest_from_predictions
         
         # Fallback: try to extract text from string representation
         result_str = str(result)
@@ -120,14 +172,8 @@ def create_multi_agent_page():
                         ], className="multi-agent-suggestions")
                     ], id="multi-agent-welcome", className="multi-agent-welcome-container visible"),
                     
-                    # Chat messages with loading spinner
-                    dcc.Loading(
-                        id="multi-agent-loading",
-                        type="default",  # You can also try "graph", "cube", "circle", or "dot"
-                        children=[
-                            html.Div([], id="multi-agent-messages", className="multi-agent-messages")
-                        ]
-                    ),
+                    # Chat messages (no overlay loading; we use an inline thinking indicator)
+                    html.Div([], id="multi-agent-messages", className="multi-agent-messages"),
                 ], className="multi-agent-chat-area"),
                 
                 # Input area
@@ -155,7 +201,10 @@ def create_multi_agent_page():
                     ], className="multi-agent-disclaimer-centered"),
                 ], className="multi-agent-input-wrapper")
             ], className="multi-agent-content")
-        ], className="multi-agent-container")
+        ], className="multi-agent-container"),
+        # Trigger store for async processing
+        dcc.Store(id="multi-agent-trigger", data={"trigger": False, "message": ""}),
+        html.Div(id="multi-agent-scroll-dummy")
     ], className="multi-agent-page")
 
 
@@ -163,12 +212,14 @@ def create_multi_agent_page():
 def register_multi_agent_callbacks(app):
     """Register simplified multi-agent callback"""
     
-    from components import create_user_message, create_bot_response
+    from components import create_user_message, create_bot_response, create_thinking_indicator
     
+    # Step 1: append user message and a thinking indicator; trigger async call
     @app.callback(
-        [Output("multi-agent-messages", "children"),
-         Output("multi-agent-input", "value"),
-         Output("multi-agent-welcome", "className")],
+        [Output("multi-agent-messages", "children", allow_duplicate=True),
+         Output("multi-agent-input", "value", allow_duplicate=True),
+         Output("multi-agent-welcome", "className", allow_duplicate=True),
+         Output("multi-agent-trigger", "data", allow_duplicate=True)],
         [Input("multi-agent-send-button", "n_clicks"),
          Input("multi-agent-input", "n_submit")],
         [State("multi-agent-input", "value"),
@@ -177,27 +228,50 @@ def register_multi_agent_callbacks(app):
     )
     def handle_multi_agent_input(send_clicks, submit_clicks, input_value, current_messages):
         if not input_value or not input_value.strip():
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
         
         # Add user message
         user_message = create_user_message(input_value)
         updated_messages = current_messages + [user_message] if current_messages else [user_message]
         
-        # Call API and get response
-        try:
-            response_text = call_multi_agent_endpoint(input_value)
-            
-            # Create bot response
-            content = dcc.Markdown(response_text, className="message-text")
-            bot_response = create_bot_response(content, len(updated_messages))
-            updated_messages.append(bot_response)
-            
-        except Exception as e:
-            error_msg = f"Error: {str(e)}"
-            error_response = html.Div(error_msg, className="error-message")
-            updated_messages.append(error_response)
+        # Add thinking indicator
+        thinking = create_thinking_indicator()
+        updated_messages.append(thinking)
         
-        return updated_messages, "", "multi-agent-welcome-container hidden"
+        return (
+            updated_messages,
+            "",
+            "multi-agent-welcome-container hidden",
+            {"trigger": True, "message": input_value}
+        )
+
+    # Step 2: perform API call and replace thinking indicator with response
+    @app.callback(
+        [Output("multi-agent-messages", "children", allow_duplicate=True),
+         Output("multi-agent-trigger", "data", allow_duplicate=True)],
+        [Input("multi-agent-trigger", "data")],
+        [State("multi-agent-messages", "children")],
+        prevent_initial_call=True
+    )
+    def fetch_multi_agent_response(trigger_data, current_messages):
+        if not trigger_data or not trigger_data.get("trigger"):
+            return dash.no_update, dash.no_update
+        
+        user_input = trigger_data.get("message", "")
+        if not user_input:
+            return dash.no_update, {"trigger": False, "message": ""}
+        
+        try:
+            response_text = call_multi_agent_endpoint(user_input)
+            content = dcc.Markdown(response_text, className="message-text")
+            bot_response = create_bot_response(content, len(current_messages))
+            # Replace the last message (thinking indicator) with the bot response
+            updated = (current_messages[:-1] + [bot_response]) if current_messages else [bot_response]
+            return updated, {"trigger": False, "message": ""}
+        except Exception as e:
+            error_msg = html.Div(f"Error: {str(e)}", className="error-message")
+            updated = (current_messages[:-1] + [error_msg]) if current_messages else [error_msg]
+            return updated, {"trigger": False, "message": ""}
 
 
     @app.callback(
@@ -210,3 +284,19 @@ def register_multi_agent_callbacks(app):
         if n_clicks:
             return [], "multi-agent-welcome-container visible"
         return dash.no_update, dash.no_update
+
+    # Auto-scroll to bottom when new messages render
+    app.clientside_callback(
+        """
+        function(children) {
+            var container = document.getElementById('multi-agent-messages');
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+            }
+            return '';
+        }
+        """,
+        Output('multi-agent-scroll-dummy', 'children'),
+        Input('multi-agent-messages', 'children'),
+        prevent_initial_call=True
+    )

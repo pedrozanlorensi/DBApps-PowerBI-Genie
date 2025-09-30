@@ -1220,6 +1220,7 @@ input:disabled, button:disabled {
     display: flex;
     flex-direction: column;
     gap: 16px;
+    max-height: calc(100vh - 48px - 160px);
 }
 
 .multi-agent-input-wrapper {
