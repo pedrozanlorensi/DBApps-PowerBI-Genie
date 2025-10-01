@@ -84,14 +84,26 @@ def _extract_latest_text_from_predictions(predictions) -> Optional[str]:
     return None
 
 
-def call_multi_agent_endpoint(message: str) -> str:
-    """Simple API call to multi-agent endpoint"""
+def call_multi_agent_endpoint(message: str, history: Optional[list] = None) -> str:
+    """
+    API call to multi-agent endpoint with conversation history.
+    
+    Args:
+        message: The current user message
+        history: List of previous message dicts with 'role' and 'content'
+    """
     try:
         if not MULTI_AGENT_SERVING_ENDPOINT:
             return "Multi-agent endpoint not configured."
         
+        # Build input with history + current message
+        input_messages = []
+        if history:
+            input_messages.extend(history)
+        input_messages.append({"role": "user", "content": message})
+        
         payload = {
-            "input": [{"role": "user", "content": message}]
+            "input": input_messages
         }
         
         headers = {
@@ -204,6 +216,8 @@ def create_multi_agent_page():
         ], className="multi-agent-container"),
         # Trigger store for async processing
         dcc.Store(id="multi-agent-trigger", data={"trigger": False, "message": ""}),
+        # Store conversation memory (last 5 Q&A pairs → 10 messages)
+        dcc.Store(id="multi-agent-history", data=[]),
         html.Div(id="multi-agent-scroll-dummy")
     ], className="multi-agent-page")
 
@@ -248,42 +262,55 @@ def register_multi_agent_callbacks(app):
     # Step 2: perform API call and replace thinking indicator with response
     @app.callback(
         [Output("multi-agent-messages", "children", allow_duplicate=True),
-         Output("multi-agent-trigger", "data", allow_duplicate=True)],
+         Output("multi-agent-trigger", "data", allow_duplicate=True),
+         Output("multi-agent-history", "data", allow_duplicate=True)],
         [Input("multi-agent-trigger", "data")],
-        [State("multi-agent-messages", "children")],
+        [State("multi-agent-messages", "children"),
+         State("multi-agent-history", "data")],
         prevent_initial_call=True
     )
-    def fetch_multi_agent_response(trigger_data, current_messages):
+    def fetch_multi_agent_response(trigger_data, current_messages, history):
         if not trigger_data or not trigger_data.get("trigger"):
-            return dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update
         
         user_input = trigger_data.get("message", "")
         if not user_input:
-            return dash.no_update, {"trigger": False, "message": ""}
+            return dash.no_update, {"trigger": False, "message": ""}, dash.no_update
         
         try:
-            response_text = call_multi_agent_endpoint(user_input)
+            # Call endpoint with conversation history
+            response_text = call_multi_agent_endpoint(user_input, history or [])
             content = dcc.Markdown(response_text, className="message-text")
             bot_response = create_bot_response(content, len(current_messages))
             # Replace the last message (thinking indicator) with the bot response
             updated = (current_messages[:-1] + [bot_response]) if current_messages else [bot_response]
-            return updated, {"trigger": False, "message": ""}
+            
+            # Update history: keep last 5 Q&A pairs (10 messages)
+            new_history = (history or []) + [
+                {"role": "user", "content": user_input},
+                {"role": "assistant", "content": response_text}
+            ]
+            # Keep only last 10 messages (5 pairs)
+            new_history = new_history[-10:]
+            
+            return updated, {"trigger": False, "message": ""}, new_history
         except Exception as e:
             error_msg = html.Div(f"Error: {str(e)}", className="error-message")
             updated = (current_messages[:-1] + [error_msg]) if current_messages else [error_msg]
-            return updated, {"trigger": False, "message": ""}
+            return updated, {"trigger": False, "message": ""}, dash.no_update
 
 
     @app.callback(
         [Output("multi-agent-messages", "children", allow_duplicate=True),
-         Output("multi-agent-welcome", "className", allow_duplicate=True)],
+         Output("multi-agent-welcome", "className", allow_duplicate=True),
+         Output("multi-agent-history", "data", allow_duplicate=True)],
         [Input("multi-agent-refresh-button", "n_clicks")],
         prevent_initial_call=True
     )
     def refresh_multi_agent_chat(n_clicks):
         if n_clicks:
-            return [], "multi-agent-welcome-container visible"
-        return dash.no_update, dash.no_update
+            return [], "multi-agent-welcome-container visible", []
+        return dash.no_update, dash.no_update, dash.no_update
 
     # Auto-scroll to bottom when new messages render
     app.clientside_callback(
