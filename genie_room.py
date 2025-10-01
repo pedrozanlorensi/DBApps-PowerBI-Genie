@@ -150,7 +150,7 @@ class GenieClient:
         return response.json()
     
 
-    def wait_for_message_completion(self, conversation_id: str, message_id: str, timeout: int = 300, poll_interval: int = 2) -> Dict[str, Any]:
+    def wait_for_message_completion(self, conversation_id: str, message_id: str, timeout: int = 300, poll_interval: int = 0.5) -> Dict[str, Any]:
         """
         Wait for a message to reach a terminal state (COMPLETED, ERROR, etc.).
         
